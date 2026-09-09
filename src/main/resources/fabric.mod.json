@@ -1,0 +1,23 @@
+{
+	"schemaVersion": 1,
+	"id": "xray",
+	"version": "${version}",
+	"name": "Xray",
+	"description": "A blank Fabric client mod project for future Xray features.",
+	"authors": [
+		"ctugm"
+	],
+	"license": "CC0-1.0",
+	"environment": "client",
+	"entrypoints": {
+		"client": [
+			"com.ctugm.xray.client.XrayClient"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=${loader_version}",
+		"minecraft": "~${minecraft_version}",
+		"java": ">=21",
+		"fabric-api": "*"
+	}
+}
