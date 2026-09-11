@@ -1,6 +1,7 @@
 package com.ctugm.xray.client;
 
 import com.ctugm.xray.XrayToggleState;
+import com.ctugm.xray.client.render.OreRenderer;
 import com.ctugm.xray.scan.OreScanner;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -24,9 +25,11 @@ public class XrayClient implements ClientModInitializer {
 	private static final XrayToggleState XRAY_STATE = new XrayToggleState();
 	private static final OreScanner ORE_SCANNER = new OreScanner();
 
-	@Override
-	public void onInitializeClient() {
-		KeyBinding toggleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+    @Override
+    public void onInitializeClient() {
+        OreRenderer.initialize();
+
+        KeyBinding toggleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
 				"key.xray.toggle",
 				InputUtil.Type.KEYSYM,
 				GLFW.GLFW_KEY_X,
@@ -82,9 +85,13 @@ public class XrayClient implements ClientModInitializer {
 		});
 	}
 
-	public static Set<BlockPos> getDetectedOrePositions() {
-		return ORE_SCANNER.getOrePositions();
-	}
+    public static Set<BlockPos> getDetectedOrePositions() {
+        return ORE_SCANNER.getOrePositions();
+    }
+
+    public static boolean isXrayEnabled() {
+        return XRAY_STATE.isEnabled();
+    }
 
 	private static void resetScanState() {
 		ORE_SCANNER.reset();
