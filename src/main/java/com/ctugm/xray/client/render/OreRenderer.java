@@ -35,8 +35,11 @@ import java.util.OptionalDouble;
 import java.util.OptionalInt;
 import java.util.Set;
 
+// 將礦物繪製成可穿牆看見的半透明方塊與外框。
 public final class OreRenderer {
+    // CPU 端頂點資料的初始配置大小，必要時 GPU buffer 仍會動態擴充。
     private static final int INITIAL_BUFFER_SIZE = 256 * 1024;
+    // 礦物填色使用的 RGBA 顏色。
     private static final float FILL_RED = 0.0f;
     private static final float FILL_GREEN = 0.85f;
     private static final float FILL_BLUE = 1.0f;
@@ -44,13 +47,17 @@ public final class OreRenderer {
     private static final int OUTLINE_COLOR = 0xFF4DEBFF;
     private static final float OUTLINE_WIDTH = 2.0f;
 
+    // 每一幀寫入 DynamicTransforms uniform 的固定資料。
     private static final Vector4f COLOR_MODULATOR = new Vector4f(1.0f, 1.0f, 1.0f, 1.0f);
     private static final Vector3f MODEL_OFFSET = new Vector3f();
     private static final Matrix4f TEXTURE_MATRIX = new Matrix4f();
+    // 重用同一個 BufferAllocator，減少每幀建立暫存緩衝區的成本。
     private static final BufferAllocator ALLOCATOR = new BufferAllocator(INITIAL_BUFFER_SIZE);
 
+    // 填色與外框各自使用一條關閉深度測試的渲染 pipeline。
     private static RenderPipeline fillPipeline;
     private static RenderPipeline outlinePipeline;
+    // Ring buffer 跨幀重用，容量不足時才重新配置。
     private static MappableRingBuffer fillVertexBuffer;
     private static MappableRingBuffer outlineVertexBuffer;
     private static boolean initialized;
@@ -59,11 +66,13 @@ public final class OreRenderer {
     private OreRenderer() {
     }
 
+    // 註冊自訂 pipeline 與渲染事件。
     public static void initialize() {
         if (initialized) {
             return;
         }
 
+        // 不做深度測試，讓填色能穿過一般方塊顯示。
         fillPipeline = RenderPipelinesAccessor.xray$register(RenderPipeline.builder(
                         RenderPipelinesAccessor.xray$getPositionColorSnippet()
                 )
@@ -71,6 +80,7 @@ public final class OreRenderer {
                 .withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
                 .build());
 
+        // 外框同樣穿牆顯示，且不寫入深度緩衝區。
         outlinePipeline = RenderPipelinesAccessor.xray$register(RenderPipeline.builder(
                         RenderPipelinesAccessor.xray$getLinesSnippet()
                 )
@@ -84,6 +94,7 @@ public final class OreRenderer {
         initialized = true;
     }
 
+    // 繪製目前掃描到的所有礦物。
     private static void render(WorldRenderContext context) {
         Set<BlockPos> orePositions = XrayClient.getDetectedOrePositions();
         if (closed || !XrayClient.isXrayEnabled() || orePositions.isEmpty()) {
@@ -98,6 +109,7 @@ public final class OreRenderer {
         outlineVertexBuffer = renderOutlines(client, matrices, cameraPosition, orePositions);
     }
 
+    // 建立礦物的半透明填色。
     private static MappableRingBuffer renderFill(
             MinecraftClient client,
             MatrixStack matrices,
@@ -110,6 +122,7 @@ public final class OreRenderer {
                 fillPipeline.getVertexFormat()
         );
 
+        // 世界座標轉換到以相機為原點的渲染座標。
         matrices.push();
         matrices.translate(-cameraPosition.x, -cameraPosition.y, -cameraPosition.z);
         Matrix4fc positionMatrix = matrices.peek().getPositionMatrix();
@@ -135,6 +148,7 @@ public final class OreRenderer {
         return uploadAndDraw(client, fillPipeline, builder.end(), fillVertexBuffer, "ore fill");
     }
 
+    // 建立礦物的方塊外框。
     private static MappableRingBuffer renderOutlines(
             MinecraftClient client,
             MatrixStack matrices,
@@ -167,6 +181,7 @@ public final class OreRenderer {
         return uploadAndDraw(client, outlinePipeline, builder.end(), outlineVertexBuffer, "ore outline");
     }
 
+    // 將頂點資料上傳到 GPU 並送出 draw call。
     private static MappableRingBuffer uploadAndDraw(
             MinecraftClient client,
             RenderPipeline pipeline,
@@ -179,6 +194,7 @@ public final class OreRenderer {
             VertexFormat format = drawParameters.format();
             int requiredSize = drawParameters.vertexCount() * format.getVertexSize();
 
+            // 礦物變多導致容量不足時才重建 buffer。
             if (vertexBuffer == null || vertexBuffer.size() < requiredSize) {
                 if (vertexBuffer != null) {
                     vertexBuffer.close();
@@ -191,6 +207,7 @@ public final class OreRenderer {
                 );
             }
 
+            // 將 BufferBuilder 產生的頂點資料複製至 GPU 可讀取的記憶體。
             ByteBuffer vertices = builtBuffer.getBuffer();
             CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
             try (GpuBuffer.MappedView mappedView = encoder.mapBuffer(
@@ -203,6 +220,7 @@ public final class OreRenderer {
 
             GpuBuffer indexBuffer;
             VertexFormat.IndexType indexType;
+            // QUADS 需要依相機排序透明面；線條則使用 Minecraft 共用的循序索引。
             if (pipeline.getVertexFormatMode() == VertexFormat.DrawMode.QUADS) {
                 builtBuffer.sortQuads(ALLOCATOR, RenderSystem.getProjectionType().getVertexSorter());
                 indexBuffer = format.uploadImmediateIndexBuffer(builtBuffer.getSortedBuffer());
@@ -215,6 +233,7 @@ public final class OreRenderer {
                 indexType = sequentialBuffer.getIndexType();
             }
 
+            // 寫入本次 draw call 使用的模型、顏色與材質矩陣。
             GpuBufferSlice dynamicTransforms = RenderSystem.getDynamicUniforms().write(
                     RenderSystem.getModelViewMatrix(),
                     COLOR_MODULATOR,
@@ -239,11 +258,13 @@ public final class OreRenderer {
                 renderPass.drawIndexed(0, 0, drawParameters.indexCount(), 1);
             }
 
+            // 移到 ring buffer 的下一段，避免下一幀覆寫 GPU 仍在使用的資料。
             vertexBuffer.rotate();
             return vertexBuffer;
         }
     }
 
+    // 寫入方塊六個面的頂點。
     private static void renderFilledBox(
             Matrix4fc positionMatrix,
             BufferBuilder buffer,
@@ -258,37 +279,44 @@ public final class OreRenderer {
             float blue,
             float alpha
     ) {
+        // 南面（+Z）。
         buffer.vertex(positionMatrix, minX, minY, maxZ).color(red, green, blue, alpha);
         buffer.vertex(positionMatrix, maxX, minY, maxZ).color(red, green, blue, alpha);
         buffer.vertex(positionMatrix, maxX, maxY, maxZ).color(red, green, blue, alpha);
         buffer.vertex(positionMatrix, minX, maxY, maxZ).color(red, green, blue, alpha);
 
+        // 北面（-Z）。
         buffer.vertex(positionMatrix, maxX, minY, minZ).color(red, green, blue, alpha);
         buffer.vertex(positionMatrix, minX, minY, minZ).color(red, green, blue, alpha);
         buffer.vertex(positionMatrix, minX, maxY, minZ).color(red, green, blue, alpha);
         buffer.vertex(positionMatrix, maxX, maxY, minZ).color(red, green, blue, alpha);
 
+        // 西面（-X）。
         buffer.vertex(positionMatrix, minX, minY, minZ).color(red, green, blue, alpha);
         buffer.vertex(positionMatrix, minX, minY, maxZ).color(red, green, blue, alpha);
         buffer.vertex(positionMatrix, minX, maxY, maxZ).color(red, green, blue, alpha);
         buffer.vertex(positionMatrix, minX, maxY, minZ).color(red, green, blue, alpha);
 
+        // 東面（+X）。
         buffer.vertex(positionMatrix, maxX, minY, maxZ).color(red, green, blue, alpha);
         buffer.vertex(positionMatrix, maxX, minY, minZ).color(red, green, blue, alpha);
         buffer.vertex(positionMatrix, maxX, maxY, minZ).color(red, green, blue, alpha);
         buffer.vertex(positionMatrix, maxX, maxY, maxZ).color(red, green, blue, alpha);
 
+        // 上面（+Y）。
         buffer.vertex(positionMatrix, minX, maxY, maxZ).color(red, green, blue, alpha);
         buffer.vertex(positionMatrix, maxX, maxY, maxZ).color(red, green, blue, alpha);
         buffer.vertex(positionMatrix, maxX, maxY, minZ).color(red, green, blue, alpha);
         buffer.vertex(positionMatrix, minX, maxY, minZ).color(red, green, blue, alpha);
 
+        // 下面（-Y）。
         buffer.vertex(positionMatrix, minX, minY, minZ).color(red, green, blue, alpha);
         buffer.vertex(positionMatrix, maxX, minY, minZ).color(red, green, blue, alpha);
         buffer.vertex(positionMatrix, maxX, minY, maxZ).color(red, green, blue, alpha);
         buffer.vertex(positionMatrix, minX, minY, maxZ).color(red, green, blue, alpha);
     }
 
+    // 關閉 CPU 與 GPU 緩衝資源。
     public static void close() {
         if (closed) {
             return;

@@ -11,7 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+// 測試掃描邊界、座標保存與重掃條件。
 class OreScannerTest {
+	// 掃描範圍的每一軸都必須精確包含 16 格。
 	@Test
 	void scansExactlySixteenBlocksOnEveryAxis() {
 		OreScanner scanner = new OreScanner();
@@ -27,6 +29,7 @@ class OreScannerTest {
 		assertFalse(result.positions().contains(center.add(0, 0, 8)));
 	}
 
+	// 只保存 matcher 接受的座標，且公開集合不可被呼叫端修改。
 	@Test
 	void filtersAndStoresAnImmutableCoordinateSet() {
 		OreScanner scanner = new OreScanner();
@@ -50,6 +53,7 @@ class OreScannerTest {
 				() -> result.positions().add(center.add(1, 1, 1)));
 	}
 
+	// 礦物數量相同時不重複標記變更，reset 後第一次結果要重新回報。
 	@Test
 	void reportsOnlyInitialAndChangedCountsAndResetStartsOver() {
 		OreScanner scanner = new OreScanner();
@@ -77,6 +81,7 @@ class OreScannerTest {
 				.countChanged());
 	}
 
+	// 只有位置、世界或 reset 狀態改變時才允許重新掃描。
 	@Test
 	void rescansOnlyAfterMovementWorldChangeOrReset() {
 		OreScanner scanner = new OreScanner();
