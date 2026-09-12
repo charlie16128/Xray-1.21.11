@@ -61,6 +61,8 @@ public class XrayClient implements ClientModInitializer {
 			Optional<OreScanner.ScanResult> scanResult = ORE_SCANNER.scanIfNeeded(
 					client.world,
 					center,
+					client.world.getBottomY(),
+					client.world.getBottomY() + client.world.getHeight(),
 					position -> {
 						if (client.world.isOutOfHeightLimit(position)) {
 							return false;

@@ -8,9 +8,10 @@ import java.util.Set;
 import java.util.function.Predicate;
 
 public final class OreScanner {
-	// 掃描範圍：中心點周圍 -8 ~ 7，共 16 格
-	private static final int MIN_OFFSET = -8;
-	private static final int MAX_OFFSET = 7;
+	private static final int CHUNK_SIZE = 16;
+	private static final int CHUNK_RADIUS = 1;
+	private static final int DEFAULT_MIN_Y_OFFSET = -8;
+	private static final int DEFAULT_MAX_Y_OFFSET = 7;
 
 	// 儲存目前找到的礦物位置
 	private Set<BlockPos> orePositions = Set.of();
@@ -25,12 +26,28 @@ public final class OreScanner {
 			BlockPos center,
 			Predicate<BlockPos> oreMatcher
 	) {
+		return scanIfNeeded(
+				scanContext,
+				center,
+				center.getY() + DEFAULT_MIN_Y_OFFSET,
+				center.getY() + DEFAULT_MAX_Y_OFFSET + 1,
+				oreMatcher
+		);
+	}
+
+	public Optional<ScanResult> scanIfNeeded(
+			Object scanContext,
+			BlockPos center,
+			int minY,
+			int maxYExclusive,
+			Predicate<BlockPos> oreMatcher
+	) {
 		// 掃描環境與中心位置沒變時，直接跳過
 		if (scanContext == lastScanContext && center.equals(lastScanCenter)) {
 			return Optional.empty();
 		}
 
-		ScanResult result = scan(center, oreMatcher);
+		ScanResult result = scan(center, minY, maxYExclusive, oreMatcher);
 
 		// 紀錄本次掃描狀態
 		lastScanContext = scanContext;
@@ -40,13 +57,33 @@ public final class OreScanner {
 	}
 
 	public ScanResult scan(BlockPos center, Predicate<BlockPos> oreMatcher) {
-		Set<BlockPos> foundPositions = new HashSet<>();
+		return scan(
+				center,
+				center.getY() + DEFAULT_MIN_Y_OFFSET,
+				center.getY() + DEFAULT_MAX_Y_OFFSET + 1,
+				oreMatcher
+		);
+	}
 
-		// 掃描中心周圍 16 × 16 × 16 的方塊
-		for (int x = MIN_OFFSET; x <= MAX_OFFSET; x++) {
-			for (int y = MIN_OFFSET; y <= MAX_OFFSET; y++) {
-				for (int z = MIN_OFFSET; z <= MAX_OFFSET; z++) {
-					BlockPos position = center.add(x, y, z);
+	public ScanResult scan(
+			BlockPos center,
+			int minY,
+			int maxYExclusive,
+			Predicate<BlockPos> oreMatcher
+	) {
+		Set<BlockPos> foundPositions = new HashSet<>();
+		int centerChunkX = Math.floorDiv(center.getX(), CHUNK_SIZE);
+		int centerChunkZ = Math.floorDiv(center.getZ(), CHUNK_SIZE);
+		int minX = (centerChunkX - CHUNK_RADIUS) * CHUNK_SIZE;
+		int maxXExclusive = (centerChunkX + CHUNK_RADIUS + 1) * CHUNK_SIZE;
+		int minZ = (centerChunkZ - CHUNK_RADIUS) * CHUNK_SIZE;
+		int maxZExclusive = (centerChunkZ + CHUNK_RADIUS + 1) * CHUNK_SIZE;
+
+		// 掃描玩家所在 Chunk 與周圍 8 個 Chunk；Y 使用目前維度的完整絕對高度
+		for (int x = minX; x < maxXExclusive; x++) {
+			for (int y = minY; y < maxYExclusive; y++) {
+				for (int z = minZ; z < maxZExclusive; z++) {
+					BlockPos position = new BlockPos(x, y, z);
 
 					// 符合 oreMatcher 的方塊就記錄起來
 					if (oreMatcher.test(position)) {
