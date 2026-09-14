@@ -6,7 +6,6 @@ import com.ctugm.xray.scan.OreScanner;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
@@ -67,21 +66,11 @@ public class XrayClient implements ClientModInitializer {
 
 			BlockPos center = client.player.getBlockPos().toImmutable();
 			// OreScanner 會自行判斷玩家是否仍在同一 Chunk，並只掃描新增 Chunk。
-			Optional<OreScanner.ScanResult> scanResult = ORE_SCANNER.scanIfNeeded(
+			Optional<OreScanner.ScanResult> scanResult = ORE_SCANNER.scanWorldIfNeeded(
 					client.world,
 					center,
-					client.world.getBottomY(),
-					client.world.getBottomY() + client.world.getHeight(),
-					position -> {
-						// 防止自訂維度或高度邊界造成無效的方塊查詢。
-						if (client.world.isOutOfHeightLimit(position)) {
-							return false;
-						}
-
-						BlockState state = client.world.getBlockState(position);
-						return state.isOf(Blocks.DIAMOND_ORE)
-								|| state.isOf(Blocks.DEEPSLATE_DIAMOND_ORE);
-					}
+					state -> state.isOf(Blocks.DIAMOND_ORE)
+							|| state.isOf(Blocks.DEEPSLATE_DIAMOND_ORE)
 			);
 			if (scanResult.isEmpty()) {
 				return;

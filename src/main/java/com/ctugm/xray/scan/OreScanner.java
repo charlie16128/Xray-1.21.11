@@ -1,6 +1,10 @@
 package com.ctugm.xray.scan;
 
+import net.minecraft.block.BlockState;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.World;
+import net.minecraft.world.chunk.ChunkSection;
+import net.minecraft.world.chunk.WorldChunk;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -49,6 +53,30 @@ public final class OreScanner {
 		);
 	}
 
+	// 使用世界的 ChunkSection 資料跳過全空區段。
+	public Optional<ScanResult> scanWorldIfNeeded(
+			World world,
+			BlockPos center,
+			Predicate<BlockState> oreMatcher
+	) {
+		int minY = world.getBottomY();
+		int maxYExclusive = minY + world.getHeight();
+
+		return scanChunksIfNeeded(
+				world,
+				center,
+				minY,
+				maxYExclusive,
+				chunk -> scanWorldChunk(
+						world,
+						chunk,
+						minY,
+						maxYExclusive,
+						oreMatcher
+				)
+		);
+	}
+
 	// 只有 Chunk、世界或高度範圍改變時才更新掃描結果。
 	public Optional<ScanResult> scanIfNeeded(
 			Object scanContext,
@@ -56,6 +84,23 @@ public final class OreScanner {
 			int minY,
 			int maxYExclusive,
 			Predicate<BlockPos> oreMatcher
+	) {
+		return scanChunksIfNeeded(
+				scanContext,
+				center,
+				minY,
+				maxYExclusive,
+				chunk -> scanChunk(chunk, minY, maxYExclusive, oreMatcher)
+		);
+	}
+
+	// 共用 Chunk 快取與重掃判斷。
+	private Optional<ScanResult> scanChunksIfNeeded(
+			Object scanContext,
+			BlockPos center,
+			int minY,
+			int maxYExclusive,
+			ChunkScanner chunkScanner
 	) {
 		ChunkKey centerChunk = ChunkKey.from(center);
 		boolean scanRangeChanged = lastMinY == null
@@ -86,12 +131,7 @@ public final class OreScanner {
 				continue;
 			}
 
-			ChunkScanResult chunkResult = scanChunk(
-					chunk,
-					minY,
-					maxYExclusive,
-					oreMatcher
-			);
+			ChunkScanResult chunkResult = chunkScanner.scan(chunk);
 			orePositionsByChunk.put(chunk, chunkResult.positions());
 			scannedBlockCount += chunkResult.scannedBlockCount();
 		}
@@ -158,6 +198,60 @@ public final class OreScanner {
 		return chunks;
 	}
 
+	// 跳過全空 Section，只掃描仍包含方塊的 16×16×16 區段。
+	private ChunkScanResult scanWorldChunk(
+			World world,
+			ChunkKey chunk,
+			int minY,
+			int maxYExclusive,
+			Predicate<BlockState> oreMatcher
+	) {
+		Set<BlockPos> foundPositions = new HashSet<>();
+		int scannedBlockCount = 0;
+		int minX = chunk.x() * CHUNK_SIZE;
+		int minZ = chunk.z() * CHUNK_SIZE;
+		WorldChunk worldChunk = world.getChunk(chunk.x(), chunk.z());
+		ChunkSection[] sections = worldChunk.getSectionArray();
+
+		for (int sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
+			ChunkSection section = sections[sectionIndex];
+			int sectionMinY = world.sectionIndexToCoord(sectionIndex) * CHUNK_SIZE;
+			int sectionMaxYExclusive = sectionMinY + CHUNK_SIZE;
+			int scanMinY = Math.max(minY, sectionMinY);
+			int scanMaxYExclusive = Math.min(maxYExclusive, sectionMaxYExclusive);
+
+			if (scanMinY >= scanMaxYExclusive || section.isEmpty()) {
+				continue;
+			}
+
+			for (int localX = 0; localX < CHUNK_SIZE; localX++) {
+				for (int localZ = 0; localZ < CHUNK_SIZE; localZ++) {
+					for (int y = scanMinY; y < scanMaxYExclusive; y++) {
+						BlockState state = section.getBlockState(
+								localX,
+								y - sectionMinY,
+								localZ
+						);
+						scannedBlockCount++;
+
+						if (oreMatcher.test(state)) {
+							foundPositions.add(new BlockPos(
+									minX + localX,
+									y,
+									minZ + localZ
+							));
+						}
+					}
+				}
+			}
+		}
+
+		return new ChunkScanResult(
+				Set.copyOf(foundPositions),
+				scannedBlockCount
+		);
+	}
+
 	// 掃描單一 Chunk，並重用 Mutable 座標減少物件配置。
 	private ChunkScanResult scanChunk(
 			ChunkKey chunk,
@@ -169,6 +263,7 @@ public final class OreScanner {
 		int scannedBlockCount = 0;
 		int minX = chunk.x() * CHUNK_SIZE;
 		int minZ = chunk.z() * CHUNK_SIZE;
+//		int
 		BlockPos.Mutable position = new BlockPos.Mutable();
 
 		// 每次 oreMatcher.test 都代表實際檢查了一個世界方塊。
@@ -241,6 +336,11 @@ public final class OreScanner {
 			Set<BlockPos> positions,
 			int scannedBlockCount
 	) {
+	}
+
+	@FunctionalInterface
+	private interface ChunkScanner {
+		ChunkScanResult scan(ChunkKey chunk);
 	}
 
 	// 作為快取索引的 Chunk 座標。

@@ -13,20 +13,24 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 // 測試掃描邊界、座標保存與重掃條件。
 class OreScannerTest {
-	// 掃描範圍的每一軸都必須精確包含 16 格。
+	// 掃描範圍必須涵蓋 3×3 Chunk 與預設 16 格高度。
 	@Test
-	void scansExactlySixteenBlocksOnEveryAxis() {
+	void scansThreeByThreeChunksAcrossDefaultHeight() {
 		OreScanner scanner = new OreScanner();
 		BlockPos center = new BlockPos(10, 20, 30);
 
 		OreScanner.ScanResult result = scanner.scan(center, position -> true);
 
-		assertEquals(4096, result.count());
-		assertTrue(result.positions().contains(center.add(-8, -8, -8)));
-		assertTrue(result.positions().contains(center.add(7, 7, 7)));
-		assertFalse(result.positions().contains(center.add(8, 0, 0)));
-		assertFalse(result.positions().contains(center.add(0, 8, 0)));
-		assertFalse(result.positions().contains(center.add(0, 0, 8)));
+		assertEquals(36_864, result.count());
+		assertEquals(36_864, result.scannedBlockCount());
+		assertTrue(result.positions().contains(new BlockPos(-16, 12, 0)));
+		assertTrue(result.positions().contains(new BlockPos(31, 27, 47)));
+		assertFalse(result.positions().contains(new BlockPos(-17, 12, 0)));
+		assertFalse(result.positions().contains(new BlockPos(32, 12, 0)));
+		assertFalse(result.positions().contains(new BlockPos(0, 11, 0)));
+		assertFalse(result.positions().contains(new BlockPos(0, 28, 0)));
+		assertFalse(result.positions().contains(new BlockPos(0, 12, -1)));
+		assertFalse(result.positions().contains(new BlockPos(0, 12, 48)));
 	}
 
 	// 只保存 matcher 接受的座標，且公開集合不可被呼叫端修改。
@@ -38,7 +42,7 @@ class OreScannerTest {
 				center.add(-8, -8, -8),
 				center,
 				center.add(7, 7, 7),
-				center.add(8, 0, 0)
+				new BlockPos(32, 0, 0)
 		);
 
 		OreScanner.ScanResult result = scanner.scan(center, matching::contains);
@@ -81,9 +85,9 @@ class OreScannerTest {
 				.countChanged());
 	}
 
-	// 只有位置、世界或 reset 狀態改變時才允許重新掃描。
+	// 只有 Chunk、世界或 reset 狀態改變時才允許重新掃描。
 	@Test
-	void rescansOnlyAfterMovementWorldChangeOrReset() {
+	void rescansOnlyAfterChunkWorldChangeOrReset() {
 		OreScanner scanner = new OreScanner();
 		BlockPos center = new BlockPos(0, 0, 0);
 		Object firstWorld = new Object();
@@ -98,7 +102,7 @@ class OreScannerTest {
 					return false;
 				}
 		).isPresent());
-		assertEquals(4096, testedPositions.get());
+		assertEquals(36_864, testedPositions.get());
 
 		assertTrue(scanner.scanIfNeeded(
 				firstWorld,
@@ -108,7 +112,7 @@ class OreScannerTest {
 					return false;
 				}
 		).isEmpty());
-		assertEquals(4096, testedPositions.get());
+		assertEquals(36_864, testedPositions.get());
 
 		assertTrue(scanner.scanIfNeeded(
 				firstWorld,
@@ -117,8 +121,19 @@ class OreScannerTest {
 					testedPositions.incrementAndGet();
 					return false;
 				}
-		).isPresent());
-		assertEquals(8192, testedPositions.get());
+		).isEmpty());
+		assertEquals(36_864, testedPositions.get());
+
+		OreScanner.ScanResult movedChunkResult = scanner.scanIfNeeded(
+				firstWorld,
+				center.add(16, 0, 0),
+				position -> {
+					testedPositions.incrementAndGet();
+					return false;
+				}
+		).orElseThrow();
+		assertEquals(12_288, movedChunkResult.scannedBlockCount());
+		assertEquals(49_152, testedPositions.get());
 
 		assertTrue(scanner.scanIfNeeded(
 				secondWorld,
@@ -128,7 +143,7 @@ class OreScannerTest {
 					return false;
 				}
 		).isPresent());
-		assertEquals(12288, testedPositions.get());
+		assertEquals(86_016, testedPositions.get());
 
 		scanner.reset();
 
@@ -140,6 +155,6 @@ class OreScannerTest {
 					return false;
 				}
 		).isPresent());
-		assertEquals(16384, testedPositions.get());
+		assertEquals(122_880, testedPositions.get());
 	}
 }
