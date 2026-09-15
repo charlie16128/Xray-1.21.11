@@ -31,6 +31,18 @@ class OreScannerTest {
 		), publicMethods);
 	}
 
+	// 掃描結果只回傳正式呼叫端需要的計數資訊。
+	@Test
+	void scanResultContainsOnlyRuntimeCounters() {
+		assertEquals(
+				Set.of("count", "countChanged", "scannedBlockCount"),
+				Arrays.stream(OreScanner.ScanResult.class.getRecordComponents())
+						.map(component -> component.getName())
+						.collect(Collectors.toSet())
+		);
+	}
+
+
 	// 初次掃描 3×3 Chunk；跨越一個 Chunk 後只掃描新進入的 3 個 Chunk。
 	@Test
 	void scansNineChunksThenOnlyThreeAfterCrossingAChunkBoundary() {
@@ -173,22 +185,5 @@ class OreScannerTest {
 				Set.of(new BlockPos(chunk.x() * 16, 0, chunk.z() * 16)),
 				4_096
 		);
-	}
-
-	private static OreScanner.ScanResult scanSingleCenterOre(
-			OreScanner scanner,
-			Object context,
-			BlockPos ore
-	) {
-		return scanner.scanChunksIfNeeded(
-				context,
-				new BlockPos(0, 0, 0),
-				0,
-				16,
-				chunk -> new OreScanner.ChunkScanResult(
-						chunk.x() == 0 && chunk.z() == 0 ? Set.of(ore) : Set.of(),
-						4_096
-				)
-		).orElseThrow();
 	}
 }

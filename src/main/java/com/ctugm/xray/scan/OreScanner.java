@@ -19,9 +19,6 @@ public final class OreScanner {
 	private static final int CHUNK_SIZE = 16;
 	// 半徑 1 代表中心 Chunk 加周圍 8 個 Chunk，共 3×3。
 	private static final int CHUNK_RADIUS = 1;
-	// 未指定世界高度時，保留舊 API 的玩家上下各 8 格掃描範圍。
-	private static final int DEFAULT_MIN_Y_OFFSET = -8;
-	private static final int DEFAULT_MAX_Y_OFFSET = 7;
 
 	// 提供給 Renderer 的完整礦物座標集合。
 	private Set<BlockPos> orePositions = Set.of();
@@ -37,21 +34,6 @@ public final class OreScanner {
 	// 記錄上次的絕對高度範圍，維度高度改變時會使快取失效。
 	private Integer lastMinY;
 	private Integer lastMaxYExclusive;
-
-	// 使用預設高度範圍，必要時才掃描。
-	Optional<ScanResult> scanIfNeeded(
-			Object scanContext,
-			BlockPos center,
-			Predicate<BlockPos> oreMatcher
-	) {
-		return scanIfNeeded(
-				scanContext,
-				center,
-				center.getY() + DEFAULT_MIN_Y_OFFSET,
-				center.getY() + DEFAULT_MAX_Y_OFFSET + 1,
-				oreMatcher
-		);
-	}
 
 	// 使用世界的 ChunkSection 資料跳過全空區段。
 	public Optional<ScanResult> scanWorldIfNeeded(
@@ -77,24 +59,7 @@ public final class OreScanner {
 		);
 	}
 
-	// 只有 Chunk、世界或高度範圍改變時才更新掃描結果。
-	Optional<ScanResult> scanIfNeeded(
-			Object scanContext,
-			BlockPos center,
-			int minY,
-			int maxYExclusive,
-			Predicate<BlockPos> oreMatcher
-	) {
-		return scanChunksIfNeeded(
-				scanContext,
-				center,
-				minY,
-				maxYExclusive,
-				chunk -> scanChunk(chunk, minY, maxYExclusive, oreMatcher)
-		);
-	}
-
-	// 共用 Chunk 快取與重掃判斷。
+	// 共用 Chunk 快取與重掃判斷；保留 package-private 供同套件測試使用。
 	Optional<ScanResult> scanChunksIfNeeded(
 			Object scanContext,
 			BlockPos center,
@@ -108,14 +73,14 @@ public final class OreScanner {
 				|| lastMaxYExclusive == null
 				|| lastMaxYExclusive != maxYExclusive;
 
-		// 同一世界、同一 Chunk 且高度範圍沒變時，不重複掃描
+		// 同一世界、同一 Chunk 且高度範圍沒變時，不重複掃描。
 		if (scanContext == lastScanContext
 				&& centerChunk.equals(lastScanChunk)
 				&& !scanRangeChanged) {
 			return Optional.empty();
 		}
 
-		// 切換世界或高度範圍時，舊 Chunk 快取不能沿用
+		// 切換世界或高度範圍時，舊 Chunk 快取不能沿用。
 		if (scanContext != lastScanContext || scanRangeChanged) {
 			orePositionsByChunk.clear();
 			lastReportedCount = null;
@@ -125,7 +90,7 @@ public final class OreScanner {
 		orePositionsByChunk.keySet().retainAll(requiredChunks);
 		int scannedBlockCount = 0;
 
-		// 跨越一個 Chunk 時，通常只會新增並掃描外側的 3 個 Chunk
+		// 跨越一個 Chunk 時，通常只會新增並掃描外側的 3 個 Chunk。
 		for (ChunkKey chunk : requiredChunks) {
 			if (orePositionsByChunk.containsKey(chunk)) {
 				continue;
@@ -138,47 +103,13 @@ public final class OreScanner {
 
 		ScanResult result = updateScanResult(scannedBlockCount);
 
-		// 紀錄本次掃描狀態
+		// 紀錄本次掃描狀態。
 		lastScanContext = scanContext;
 		lastScanChunk = centerChunk;
 		lastMinY = minY;
 		lastMaxYExclusive = maxYExclusive;
 
 		return Optional.of(result);
-	}
-
-	// 使用預設高度範圍立即掃描。
-	ScanResult scan(BlockPos center, Predicate<BlockPos> oreMatcher) {
-		return scan(
-				center,
-				center.getY() + DEFAULT_MIN_Y_OFFSET,
-				center.getY() + DEFAULT_MAX_Y_OFFSET + 1,
-				oreMatcher
-		);
-	}
-
-	// 立即掃描中心周圍的完整 3×3 Chunk。
-	ScanResult scan(
-			BlockPos center,
-			int minY,
-			int maxYExclusive,
-			Predicate<BlockPos> oreMatcher
-	) {
-		orePositionsByChunk.clear();
-		int scannedBlockCount = 0;
-
-		for (ChunkKey chunk : chunksAround(ChunkKey.from(center))) {
-			ChunkScanResult chunkResult = scanChunk(
-					chunk,
-					minY,
-					maxYExclusive,
-					oreMatcher
-			);
-			orePositionsByChunk.put(chunk, chunkResult.positions());
-			scannedBlockCount += chunkResult.scannedBlockCount();
-		}
-
-		return updateScanResult(scannedBlockCount);
 	}
 
 	// 建立中心周圍的 3×3 Chunk 座標集合。
@@ -252,40 +183,6 @@ public final class OreScanner {
 		);
 	}
 
-	// 掃描單一 Chunk，並重用 Mutable 座標減少物件配置。
-	private ChunkScanResult scanChunk(
-			ChunkKey chunk,
-			int minY,
-			int maxYExclusive,
-			Predicate<BlockPos> oreMatcher
-	) {
-		Set<BlockPos> foundPositions = new HashSet<>();
-		int scannedBlockCount = 0;
-		int minX = chunk.x() * CHUNK_SIZE;
-		int minZ = chunk.z() * CHUNK_SIZE;
-//		int
-		BlockPos.Mutable position = new BlockPos.Mutable();
-
-		// 每次 oreMatcher.test 都代表實際檢查了一個世界方塊。
-		for (int x = minX; x < minX + CHUNK_SIZE; x++) {
-			for (int z = minZ; z < minZ + CHUNK_SIZE; z++) {
-				for (int y = minY; y < maxYExclusive; y++) {
-					position.set(x, y, z);
-					scannedBlockCount++;
-
-					if (oreMatcher.test(position)) {
-						foundPositions.add(position.toImmutable());
-					}
-				}
-			}
-		}
-
-		return new ChunkScanResult(
-				Set.copyOf(foundPositions),
-				scannedBlockCount
-		);
-	}
-
 	// 合併所有 Chunk 快取並建立掃描結果。
 	private ScanResult updateScanResult(int scannedBlockCount) {
 		Set<BlockPos> foundPositions = new HashSet<>();
@@ -295,13 +192,13 @@ public final class OreScanner {
 
 		orePositions = Set.copyOf(foundPositions);
 
-		// 判斷礦物數量是否和上次不同
+		// 判斷礦物數量是否和上次不同。
 		boolean countChanged = lastReportedCount == null
 				|| lastReportedCount != orePositions.size();
 
 		lastReportedCount = orePositions.size();
 
-		return new ScanResult(orePositions, countChanged, scannedBlockCount);
+		return new ScanResult(orePositions.size(), countChanged, scannedBlockCount);
 	}
 
 	// 回傳目前範圍內不可修改的礦物座標集合。
@@ -320,15 +217,12 @@ public final class OreScanner {
 		orePositionsByChunk.clear();
 	}
 
-	// 保存合併後的座標、數量變化與本次掃描格數。
+	// 保存正式呼叫端使用的礦物數量、數量變化與本次掃描格數。
 	public record ScanResult(
-			Set<BlockPos> positions,
+			int count,
 			boolean countChanged,
 			int scannedBlockCount
 	) {
-		public int count() {
-			return positions.size();
-		}
 	}
 
 	// 保存單一 Chunk 的礦物座標與掃描格數。
