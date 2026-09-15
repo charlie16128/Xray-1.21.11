@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-// 測試掃描邊界、座標保存與重掃條件。
+// 測試正式公開介面、Chunk 快取、座標保存與重掃條件。
 class OreScannerTest {
 	// 公開介面只保留正式遊戲流程正在使用的方法。
 	@Test
@@ -31,148 +31,164 @@ class OreScannerTest {
 		), publicMethods);
 	}
 
-	// 掃描範圍必須涵蓋 3×3 Chunk 與預設 16 格高度。
+	// 初次掃描 3×3 Chunk；跨越一個 Chunk 後只掃描新進入的 3 個 Chunk。
 	@Test
-	void scansThreeByThreeChunksAcrossDefaultHeight() {
+	void scansNineChunksThenOnlyThreeAfterCrossingAChunkBoundary() {
 		OreScanner scanner = new OreScanner();
-		BlockPos center = new BlockPos(10, 20, 30);
+		Object world = new Object();
+		AtomicInteger scannedChunks = new AtomicInteger();
 
-		OreScanner.ScanResult result = scanner.scan(center, position -> true);
+		OreScanner.ScanResult first = scanner.scanChunksIfNeeded(
+				world,
+				new BlockPos(0, 0, 0),
+				0,
+				16,
+				chunk -> countedChunkResult(chunk, scannedChunks)
+		).orElseThrow();
 
-		assertEquals(36_864, result.count());
-		assertEquals(36_864, result.scannedBlockCount());
-		assertTrue(result.positions().contains(new BlockPos(-16, 12, 0)));
-		assertTrue(result.positions().contains(new BlockPos(31, 27, 47)));
-		assertFalse(result.positions().contains(new BlockPos(-17, 12, 0)));
-		assertFalse(result.positions().contains(new BlockPos(32, 12, 0)));
-		assertFalse(result.positions().contains(new BlockPos(0, 11, 0)));
-		assertFalse(result.positions().contains(new BlockPos(0, 28, 0)));
-		assertFalse(result.positions().contains(new BlockPos(0, 12, -1)));
-		assertFalse(result.positions().contains(new BlockPos(0, 12, 48)));
+		assertEquals(9, scannedChunks.get());
+		assertEquals(9, first.count());
+		assertEquals(9 * 4_096, first.scannedBlockCount());
+		assertTrue(scanner.scanChunksIfNeeded(
+				world,
+				new BlockPos(15, 0, 15),
+				0,
+				16,
+				chunk -> countedChunkResult(chunk, scannedChunks)
+		).isEmpty());
+		assertEquals(9, scannedChunks.get());
+
+		OreScanner.ScanResult moved = scanner.scanChunksIfNeeded(
+				world,
+				new BlockPos(16, 0, 0),
+				0,
+				16,
+				chunk -> countedChunkResult(chunk, scannedChunks)
+		).orElseThrow();
+
+		assertEquals(12, scannedChunks.get());
+		assertEquals(9, moved.count());
+		assertEquals(3 * 4_096, moved.scannedBlockCount());
 	}
 
-	// 只保存 matcher 接受的座標，且公開集合不可被呼叫端修改。
+	// 換世界或 reset 後，全部 9 個 Chunk 都必須重新掃描。
 	@Test
-	void filtersAndStoresAnImmutableCoordinateSet() {
+	void changingContextOrResettingInvalidatesEveryCachedChunk() {
 		OreScanner scanner = new OreScanner();
-		BlockPos center = new BlockPos(0, 0, 0);
-		Set<BlockPos> matching = Set.of(
-				center.add(-8, -8, -8),
-				center,
-				center.add(7, 7, 7),
-				new BlockPos(32, 0, 0)
-		);
-
-		OreScanner.ScanResult result = scanner.scan(center, matching::contains);
-
-		assertEquals(Set.of(
-				center.add(-8, -8, -8),
-				center,
-				center.add(7, 7, 7)
-		), result.positions());
-		assertEquals(result.positions(), scanner.getOrePositions());
-		assertThrows(UnsupportedOperationException.class,
-				() -> result.positions().add(center.add(1, 1, 1)));
-	}
-
-	// 礦物數量相同時不重複標記變更，reset 後第一次結果要重新回報。
-	@Test
-	void reportsOnlyInitialAndChangedCountsAndResetStartsOver() {
-		OreScanner scanner = new OreScanner();
-		BlockPos center = new BlockPos(0, 0, 0);
-
-		OreScanner.ScanResult first = scanner.scan(center, Set.of(center)::contains);
-		OreScanner.ScanResult sameCount = scanner.scan(
-				center,
-				Set.of(center.add(1, 0, 0))::contains
-		);
-		OreScanner.ScanResult changedCount = scanner.scan(
-				center,
-				Set.of(center, center.add(1, 0, 0))::contains
-		);
-
-		assertTrue(first.countChanged());
-		assertFalse(sameCount.countChanged());
-		assertEquals(Set.of(center.add(1, 0, 0)), sameCount.positions());
-		assertTrue(changedCount.countChanged());
-
-		scanner.reset();
-
-		assertTrue(scanner.getOrePositions().isEmpty());
-		assertTrue(scanner.scan(center, Set.of(center, center.add(1, 0, 0))::contains)
-				.countChanged());
-	}
-
-	// 只有 Chunk、世界或 reset 狀態改變時才允許重新掃描。
-	@Test
-	void rescansOnlyAfterChunkWorldChangeOrReset() {
-		OreScanner scanner = new OreScanner();
+		AtomicInteger scannedChunks = new AtomicInteger();
 		BlockPos center = new BlockPos(0, 0, 0);
 		Object firstWorld = new Object();
 		Object secondWorld = new Object();
-		AtomicInteger testedPositions = new AtomicInteger();
 
-		assertTrue(scanner.scanIfNeeded(
+		scanner.scanChunksIfNeeded(
 				firstWorld,
 				center,
-				position -> {
-					testedPositions.incrementAndGet();
-					return false;
-				}
-		).isPresent());
-		assertEquals(36_864, testedPositions.get());
-
-		assertTrue(scanner.scanIfNeeded(
-				firstWorld,
-				center,
-				position -> {
-					testedPositions.incrementAndGet();
-					return false;
-				}
-		).isEmpty());
-		assertEquals(36_864, testedPositions.get());
-
-		assertTrue(scanner.scanIfNeeded(
-				firstWorld,
-				center.add(1, 0, 0),
-				position -> {
-					testedPositions.incrementAndGet();
-					return false;
-				}
-		).isEmpty());
-		assertEquals(36_864, testedPositions.get());
-
-		OreScanner.ScanResult movedChunkResult = scanner.scanIfNeeded(
-				firstWorld,
-				center.add(16, 0, 0),
-				position -> {
-					testedPositions.incrementAndGet();
-					return false;
-				}
-		).orElseThrow();
-		assertEquals(12_288, movedChunkResult.scannedBlockCount());
-		assertEquals(49_152, testedPositions.get());
-
-		assertTrue(scanner.scanIfNeeded(
+				0,
+				16,
+				chunk -> countedChunkResult(chunk, scannedChunks)
+		);
+		OreScanner.ScanResult changedWorld = scanner.scanChunksIfNeeded(
 				secondWorld,
 				center,
-				position -> {
-					testedPositions.incrementAndGet();
-					return false;
-				}
-		).isPresent());
-		assertEquals(86_016, testedPositions.get());
+				0,
+				16,
+				chunk -> countedChunkResult(chunk, scannedChunks)
+		).orElseThrow();
+
+		assertEquals(18, scannedChunks.get());
+		assertEquals(9 * 4_096, changedWorld.scannedBlockCount());
 
 		scanner.reset();
-
-		assertTrue(scanner.scanIfNeeded(
+		OreScanner.ScanResult afterReset = scanner.scanChunksIfNeeded(
 				secondWorld,
 				center,
-				position -> {
-					testedPositions.incrementAndGet();
-					return false;
-				}
-		).isPresent());
-		assertEquals(122_880, testedPositions.get());
+				0,
+				16,
+				chunk -> countedChunkResult(chunk, scannedChunks)
+		).orElseThrow();
+
+		assertEquals(27, scannedChunks.get());
+		assertEquals(9 * 4_096, afterReset.scannedBlockCount());
+	}
+
+	// 座標集合不可修改；只有總數改變時 countChanged 才為 true。
+	@Test
+	void mergesImmutablePositionsAndReportsOnlyCountChanges() {
+		OreScanner scanner = new OreScanner();
+		Object world = new Object();
+		BlockPos firstOre = new BlockPos(-16, 0, 0);
+		BlockPos replacementOre = new BlockPos(32, 0, 0);
+		BlockPos additionalOre = new BlockPos(48, 0, 0);
+		OreScanner.ChunkScanner chunkScanner = chunk -> {
+			boolean containsOre = chunk.z() == 0
+					&& (chunk.x() == -1 || chunk.x() == 2 || chunk.x() == 3);
+			return new OreScanner.ChunkScanResult(
+					containsOre
+							? Set.of(new BlockPos(chunk.x() * 16, 0, 0))
+							: Set.of(),
+					4_096
+			);
+		};
+
+		OreScanner.ScanResult first = scanner.scanChunksIfNeeded(
+				world,
+				new BlockPos(0, 0, 0),
+				0,
+				16,
+				chunkScanner
+		).orElseThrow();
+		assertTrue(first.countChanged());
+		assertEquals(Set.of(firstOre), scanner.getOrePositions());
+		assertThrows(UnsupportedOperationException.class,
+				() -> scanner.getOrePositions().add(replacementOre));
+
+		OreScanner.ScanResult sameCount = scanner.scanChunksIfNeeded(
+				world,
+				new BlockPos(16, 0, 0),
+				0,
+				16,
+				chunkScanner
+		).orElseThrow();
+		assertFalse(sameCount.countChanged());
+		assertEquals(Set.of(replacementOre), scanner.getOrePositions());
+
+		OreScanner.ScanResult changedCount = scanner.scanChunksIfNeeded(
+				world,
+				new BlockPos(32, 0, 0),
+				0,
+				16,
+				chunkScanner
+		).orElseThrow();
+		assertTrue(changedCount.countChanged());
+		assertEquals(2, changedCount.count());
+		assertEquals(Set.of(replacementOre, additionalOre), scanner.getOrePositions());
+	}
+
+	private static OreScanner.ChunkScanResult countedChunkResult(
+			OreScanner.ChunkKey chunk,
+			AtomicInteger scannedChunks
+	) {
+		scannedChunks.incrementAndGet();
+		return new OreScanner.ChunkScanResult(
+				Set.of(new BlockPos(chunk.x() * 16, 0, chunk.z() * 16)),
+				4_096
+		);
+	}
+
+	private static OreScanner.ScanResult scanSingleCenterOre(
+			OreScanner scanner,
+			Object context,
+			BlockPos ore
+	) {
+		return scanner.scanChunksIfNeeded(
+				context,
+				new BlockPos(0, 0, 0),
+				0,
+				16,
+				chunk -> new OreScanner.ChunkScanResult(
+						chunk.x() == 0 && chunk.z() == 0 ? Set.of(ore) : Set.of(),
+						4_096
+				)
+		).orElseThrow();
 	}
 }
