@@ -3,8 +3,11 @@ package com.ctugm.xray.scan;
 import net.minecraft.util.math.BlockPos;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Modifier;
+import java.util.Arrays;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -13,6 +16,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 // 測試掃描邊界、座標保存與重掃條件。
 class OreScannerTest {
+	// 公開介面只保留正式遊戲流程正在使用的方法。
+	@Test
+	void exposesOnlyRuntimeScannerOperations() {
+		Set<String> publicMethods = Arrays.stream(OreScanner.class.getDeclaredMethods())
+				.filter(method -> Modifier.isPublic(method.getModifiers()))
+				.map(method -> method.getName())
+				.collect(Collectors.toSet());
+
+		assertEquals(Set.of(
+				"scanWorldIfNeeded",
+				"getOrePositions",
+				"reset"
+		), publicMethods);
+	}
+
 	// 掃描範圍必須涵蓋 3×3 Chunk 與預設 16 格高度。
 	@Test
 	void scansThreeByThreeChunksAcrossDefaultHeight() {

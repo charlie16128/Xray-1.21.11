@@ -39,7 +39,7 @@ public final class OreScanner {
 	private Integer lastMaxYExclusive;
 
 	// 使用預設高度範圍，必要時才掃描。
-	public Optional<ScanResult> scanIfNeeded(
+	Optional<ScanResult> scanIfNeeded(
 			Object scanContext,
 			BlockPos center,
 			Predicate<BlockPos> oreMatcher
@@ -78,7 +78,7 @@ public final class OreScanner {
 	}
 
 	// 只有 Chunk、世界或高度範圍改變時才更新掃描結果。
-	public Optional<ScanResult> scanIfNeeded(
+	Optional<ScanResult> scanIfNeeded(
 			Object scanContext,
 			BlockPos center,
 			int minY,
@@ -95,7 +95,7 @@ public final class OreScanner {
 	}
 
 	// 共用 Chunk 快取與重掃判斷。
-	private Optional<ScanResult> scanChunksIfNeeded(
+	Optional<ScanResult> scanChunksIfNeeded(
 			Object scanContext,
 			BlockPos center,
 			int minY,
@@ -148,7 +148,7 @@ public final class OreScanner {
 	}
 
 	// 使用預設高度範圍立即掃描。
-	public ScanResult scan(BlockPos center, Predicate<BlockPos> oreMatcher) {
+	ScanResult scan(BlockPos center, Predicate<BlockPos> oreMatcher) {
 		return scan(
 				center,
 				center.getY() + DEFAULT_MIN_Y_OFFSET,
@@ -158,7 +158,7 @@ public final class OreScanner {
 	}
 
 	// 立即掃描中心周圍的完整 3×3 Chunk。
-	public ScanResult scan(
+	ScanResult scan(
 			BlockPos center,
 			int minY,
 			int maxYExclusive,
@@ -332,19 +332,19 @@ public final class OreScanner {
 	}
 
 	// 保存單一 Chunk 的礦物座標與掃描格數。
-	private record ChunkScanResult(
+	record ChunkScanResult(
 			Set<BlockPos> positions,
 			int scannedBlockCount
 	) {
 	}
 
 	@FunctionalInterface
-	private interface ChunkScanner {
+	interface ChunkScanner {
 		ChunkScanResult scan(ChunkKey chunk);
 	}
 
 	// 作為快取索引的 Chunk 座標。
-	private record ChunkKey(int x, int z) {
+	record ChunkKey(int x, int z) {
 		// floorDiv 可讓負方塊座標正確對應到負 Chunk。
 		private static ChunkKey from(BlockPos position) {
 			return new ChunkKey(
